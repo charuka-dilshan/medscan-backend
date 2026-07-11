@@ -1,5 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from groq_service import parse_prescription_text
+from pydantic import BaseModel
 import uvicorn
 
 app = FastAPI(title="MedScan AI Backend")
@@ -17,3 +19,14 @@ async def root():
 
 if __name__ == "__main__":
     uvicorn.run("main:app", reload=True)
+
+class OCRRequest(BaseModel):
+    raw_text: str
+
+@app.post("/parse-prescription")
+def parse_prescription(request: OCRRequest):
+    try:
+        result = parse_prescription_text(request.raw_text)
+        return {"status": "success", "data": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

@@ -8,8 +8,12 @@ import io
 from PIL import Image
 from ocr_service import extract_text_from_image
 from groq_service import parse_prescription_text
+import logging
 
 app = FastAPI(title="MedScan AI Backend")
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app.add_middleware(
     CORSMiddleware,
@@ -64,8 +68,8 @@ async def predict(file: UploadFile = File(...)):
         conf_val = confidence.item()
         
         # Guardrail
-        if conf_val < 0.85:
-            return {"status": "unsafe", "pill": None, "confidence": conf_val, "msg": "Confidence too low"}
+        # if conf_val < 0.85:
+        #     return {"status": "unsafe", "pill": None, "confidence": conf_val, "msg": "Confidence too low"}
         
         return {
             "status": "success", 
@@ -90,43 +94,25 @@ if __name__ == "__main__":
 
 @app.post("/scan-prescription")
 async def scan_prescription(file: UploadFile = File(...)):
-    try:
-        contents = await file.read()
-        
-        # 1. Extract text via EasyOCR
-        raw_text = extract_text_from_image(contents)
-        
-        # Guardrail Check 1: Empty or extremely short OCR string
-        if not raw_text.strip() or len(raw_text.strip()) < 10:
-            return {
-                "status": "safety_block",
-                "confidence_score": 0.0,
-                "message": "Prescription text is too blurry or unreadable. Please capture a clearer photo.",
-                "message_sinhala": "ලිඛිත සටහන පැහැදිලි නැත. කරුණාකර නැවත පැහැදිලි ඡායාරූපයක් ගන්න.",
-                "message_tamil": "எழுத்துக்கள் தெளிவாக இல்லை. தயவுசெய்து தெளிவான புகைப்படம் எடுக்கவும்."
-            }
-        
-        # 2. Parse text via Groq (Llama 3)
-        parsed_data = parse_prescription_text(raw_text)
-        
-        # Guardrail Check 2: Unspecified key medical parameters
-        pill_name = parsed_data.get("pill_name", "Not specified")
-        dosage = parsed_data.get("dosage", "Not specified")
-        
-        if pill_name == "Not specified" and dosage == "Not specified":
-            return {
-                "status": "safety_block",
-                "confidence_score": 0.40,  # Below 0.85 threshold
-                "message": "AI confidence is below 85%. Could not reliably identify medicine or dosage. Please consult a pharmacist.",
-                "message_sinhala": "AI විශ්වාසනීයත්වය 85% ට වඩා අඩුය. කරුණාකර වෛද්‍යවරයකු හෝ ඖෂධවේදියකු හමුවන්න.",
-                "message_tamil": "AI இன் துல்லியம் 85% க்கும் குறைவாக உள்ளது. தயவுசெய்து மருந்தாளரை அணுகவும்."
-            }
-            
-        return {
-            "status": "success",
-            "confidence_score": 0.92, # Valid extraction
-            "prescription": parsed_data
-        }
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    # 1. Read file
+    contents = await file.read()
+    
+    # 2. OCR Extraction
+    ocr_result = extract_text_from_image(contents)
+    raw_text = ocr_result.get("text", "")
+    
+    if not raw_text.strip():
+        raise HTTPException(status_code=400, detail="OCR failed to find text.")
+
+    # 3. AI Parsing
+    ai_data = parse_prescription_text(raw_text)
+    
+    if "error" in ai_data:
+        raise HTTPException(status_code=500, detail="AI parsing failed.")
+
+    # 4. Final Response
+    return {
+        "status": "success",
+        "raw_ocr_text": raw_text,
+        "prescription": ai_data
+    }

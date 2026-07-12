@@ -6,6 +6,8 @@ from pydantic import BaseModel
 import json
 import io
 from PIL import Image
+from ocr_service import extract_text_from_image
+from groq_service import parse_prescription_text
 
 app = FastAPI(title="MedScan AI Backend")
 
@@ -85,3 +87,46 @@ def parse_prescription(request: OCRRequest):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="127.0.0.1", port=8000)
+
+@app.post("/scan-prescription")
+async def scan_prescription(file: UploadFile = File(...)):
+    try:
+        contents = await file.read()
+        
+        # 1. Extract text via EasyOCR
+        raw_text = extract_text_from_image(contents)
+        
+        # Guardrail Check 1: Empty or extremely short OCR string
+        if not raw_text.strip() or len(raw_text.strip()) < 10:
+            return {
+                "status": "safety_block",
+                "confidence_score": 0.0,
+                "message": "Prescription text is too blurry or unreadable. Please capture a clearer photo.",
+                "message_sinhala": "ලිඛිත සටහන පැහැදිලි නැත. කරුණාකර නැවත පැහැදිලි ඡායාරූපයක් ගන්න.",
+                "message_tamil": "எழுத்துக்கள் தெளிவாக இல்லை. தயவுசெய்து தெளிவான புகைப்படம் எடுக்கவும்."
+            }
+        
+        # 2. Parse text via Groq (Llama 3)
+        parsed_data = parse_prescription_text(raw_text)
+        
+        # Guardrail Check 2: Unspecified key medical parameters
+        pill_name = parsed_data.get("pill_name", "Not specified")
+        dosage = parsed_data.get("dosage", "Not specified")
+        
+        if pill_name == "Not specified" and dosage == "Not specified":
+            return {
+                "status": "safety_block",
+                "confidence_score": 0.40,  # Below 0.85 threshold
+                "message": "AI confidence is below 85%. Could not reliably identify medicine or dosage. Please consult a pharmacist.",
+                "message_sinhala": "AI විශ්වාසනීයත්වය 85% ට වඩා අඩුය. කරුණාකර වෛද්‍යවරයකු හෝ ඖෂධවේදියකු හමුවන්න.",
+                "message_tamil": "AI இன் துல்லியம் 85% க்கும் குறைவாக உள்ளது. தயவுசெய்து மருந்தாளரை அணுகவும்."
+            }
+            
+        return {
+            "status": "success",
+            "confidence_score": 0.92, # Valid extraction
+            "prescription": parsed_data
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

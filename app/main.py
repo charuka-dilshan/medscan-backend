@@ -2,7 +2,12 @@ import io
 import json
 import logging
 import os
+import sys
 from PIL import Image
+
+# DYNAMIC SYSTEM PATH FIX: 
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(ROOT_DIR)
 
 import torch
 from torchvision import models, transforms
@@ -10,12 +15,28 @@ from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-# AI Developer ගේ modules (paths නිවැරදිව import කර ඇත)
-from ocr_service import extract_text_from_image
-from groq_service import parse_prescription_text
+# ==========================================
+# 🤖 AI DEVELOPER'S MODULE IMPORTS (Fixed Paths)
+# ==========================================
+# 💡 ඔයාගේ ocr_service එක app/ocr/ subfolder එක ඇතුලේ තියන නිසා path එක මෙසේ නිවැරදි කලා.
+try:
+    from app.ocr.ocr_service import extract_text_from_image
+except ModuleNotFoundError:
+    # Fallback: AI developer සමහරවිට root එකේ හෝ වෙන තැනක තිබ්බොත් වැඩ කරන්න
+    try:
+        from ocr_service import extract_text_from_image
+    except ModuleNotFoundError:
+        raise RuntimeError("❌ ERROR: ocr_service.py could not be found in app/ocr/ or root directory!")
+
+try:
+    from app.ocr.groq_service import parse_prescription_text
+except ModuleNotFoundError:
+    try:
+        from groq_service import parse_prescription_text
+    except ModuleNotFoundError:
+        raise RuntimeError("❌ ERROR: groq_service.py could not be found in app/ocr/ or root directory!")
 
 # Core Backend Routers (Developer 1 ගේ කොටස් ඉදිරියේදී සම්බන්ධ කිරීමට)
-# 💡 සටහන: මේවා ඊළඟ පියවර වලදී අපි නිර්මාණය කරනවා.
 # from app.auth.router import router as auth_router
 # from app.health.router import router as health_router
 # from app.reminders.router import router as reminders_router
@@ -34,14 +55,14 @@ app = FastAPI(
 # 🌐 CORS Middleware Configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Flutter mobile/web එකෙන් ලේසියෙන්ම කතා කරන්න පුළුවන්
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # ==========================================
-# 🤖 AI / ML MODULE INITIALIZATION (Member 1 & 2)
+# 🤖 AI / ML MODULE INITIALIZATION
 # ==========================================
 
 # 1. Setup Transforms (MUST match training!)
@@ -51,12 +72,16 @@ val_transform = transforms.Compose([
     transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
 ])
 
+# ml files වලට නිවැරදි paths සැකසීම
+class_names_path = os.path.join(ROOT_DIR, 'ml', 'class_names.json')
+model_weights_path = os.path.join(ROOT_DIR, 'ml', 'pill_model.pth')
+
 # 2. Load Classes safely
 try:
-    with open('ml/class_names.json', 'r') as f:
+    with open(class_names_path, 'r') as f:
         class_names = json.load(f)
 except Exception:
-    class_names = ["pill_1", "pill_2"]  # Fallback classes if file missing
+    class_names = ["pill_1", "pill_2"]
 
 # 3. Load PyTorch Model Weights
 def load_my_model():
@@ -64,7 +89,7 @@ def load_my_model():
     num_classes = len(class_names)
     model.classifier[3] = torch.nn.Linear(model.classifier[3].in_features, num_classes)
     try:
-        model.load_state_dict(torch.load("ml/pill_model.pth", map_location=torch.device('cpu')))
+        model.load_state_dict(torch.load(model_weights_path, map_location=torch.device('cpu')))
     except Exception as e:
         logger.error(f"Failed to load model weights (pill_model.pth): {e}")
     model.eval()
@@ -76,10 +101,6 @@ model = load_my_model()
 # 🛡️ 85% MEDICAL SAFETY GUARDRAIL ENGINE
 # ==========================================
 def verify_safety_threshold(confidence: float):
-    """
-    Confidence score එක 85% (0.85) ට වඩා අඩු නම්, වෛද්‍ය ආරක්ෂාව සඳහා 
-    දත්ත පද්ධතියට ඇතුල් කිරීම මෙතනින්ම වළක්වා HTTPException එකක් නිකුත් කරයි.
-    """
     if confidence < 0.85:
         logger.warning(f"⚠️ SAFETY BLOCK TRIGGERED: Low confidence score: {confidence:.4f}")
         raise HTTPException(
@@ -96,15 +117,11 @@ def verify_safety_threshold(confidence: float):
 # 🚀 CORE ENDPOINTS & ROUTER REGISTRATION
 # ==========================================
 
-# Pydantic Schemas for AI endpoints
 class OCRRequest(BaseModel):
     raw_text: str
 
 @app.get("/")
 async def root():
-    """
-    Server Health Check Endpoint
-    """
     return {
         "message": "MedScan AI Backend is operational.",
         "status": "healthy"
@@ -112,9 +129,6 @@ async def root():
 
 @app.post("/predict")
 async def predict(file: UploadFile = File(...)):
-    """
-    Pill Image Classification Endpoint (PyTorch Model)
-    """
     try:
         image = Image.open(io.BytesIO(await file.read())).convert("RGB")
         image_tensor = val_transform(image).unsqueeze(0)
@@ -125,8 +139,6 @@ async def predict(file: UploadFile = File(...)):
             confidence, predicted_idx = torch.max(probs, dim=1)
         
         conf_val = confidence.item()
-        
-        # 🛡️ Enforce 85% safety rule for Pill Detection
         verify_safety_threshold(conf_val)
         
         return {
@@ -142,16 +154,10 @@ async def predict(file: UploadFile = File(...)):
 
 @app.post("/parse-prescription")
 async def parse_prescription(request: OCRRequest):
-    """
-    Parse Unstructured Prescription Text placeholder
-    """
     return {"status": "success", "data": "Prescription parsing logic goes here"}
 
 @app.post("/scan-prescription")
 async def scan_prescription(file: UploadFile = File(...)):
-    """
-    Full OCR Scanning & Groq Llama 3 AI Structuring Pipeline
-    """
     try:
         contents = await file.read()
         
@@ -163,7 +169,6 @@ async def scan_prescription(file: UploadFile = File(...)):
         if not raw_text.strip():
             raise HTTPException(status_code=400, detail="OCR failed to find any text on the image.")
 
-        # 🛡️ Enforce 85% safety rule for OCR Text Reading
         verify_safety_threshold(ocr_confidence)
 
         # Groq Llama 3 AI Parsing
@@ -184,16 +189,6 @@ async def scan_prescription(file: UploadFile = File(...)):
         logger.error(f"Scan Prescription Route Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# ==========================================
-# FUTURE ROUTER REGISTRATION PLACEHOLDERS
-# ==========================================
-# 💡 Developer 1 ගේ අනෙකුත් මොඩියුල සාදා අවසන් වූ පසු මේවා සක්‍රීය කරනු ලැබේ.
-# app.include_router(auth_router, prefix="/auth", tags=["Authentication"])
-# app.include_router(health_router, prefix="/profile", tags=["Health Profile"])
-# app.include_router(reminders_router, prefix="/reminders", tags=["Reminders"])
-# app.include_router(dashboard_router, prefix="/dashboard", tags=["Dashboard"])
-
 if __name__ == "__main__":
     import uvicorn
-    # app folder එක ඇතුලෙන් run වන නිසා "app.main:app" ලෙස වෙනස් කර ඇත
     uvicorn.run("app.main:app", host="127.0.0.1", port=8000, reload=True)

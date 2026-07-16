@@ -1,7 +1,6 @@
 import easyocr
 import cv2
 
-
 reader = easyocr.Reader(
     ['en'],
     gpu=False,
@@ -10,16 +9,13 @@ reader = easyocr.Reader(
 
 
 def preprocess_image(image_path):
-
     img = cv2.imread(image_path)
 
-    # grayscale
     gray = cv2.cvtColor(
         img,
         cv2.COLOR_BGR2GRAY
     )
 
-    # improve contrast
     thresh = cv2.threshold(
         gray,
         0,
@@ -29,22 +25,22 @@ def preprocess_image(image_path):
 
     return thresh
 
+
 def clean_text(text):
 
     replacements = {
-        "Soomg":"500mg",
-        "Parace tamol":"Paracetamol",
-        "Meda ic ine":"Medicine",
-        "PrECRIPION":"PRESCRIPTION"
+        "Soomg": "500mg",
+        "Parace tamol": "Paracetamol",
+        "Meda ic ine": "Medicine",
+        "PrECRIPION": "PRESCRIPTION",
+        "MF DICAL": "MEDICAL",
+        "Da; |y": "Daily",
+        "aftev mea |s": "after meals",
+        "Fequency": "Frequency"
     }
 
-
     for wrong, correct in replacements.items():
-        text = text.replace(
-            wrong,
-            correct
-        )
-
+        text = text.replace(wrong, correct)
 
     return text
 
@@ -61,13 +57,19 @@ def extract_text(image_path):
             paragraph=True
         )
 
+        print("OCR RESULTS:", results)
+
         texts = []
 
         for result in results:
-            text = result[1]
 
-            if text.strip():
-                texts.append(text)
+            # paragraph=True නිසා result = [bbox, text]
+            if len(result) >= 2:
+
+                text = result[1]
+
+                if text.strip():
+                    texts.append(text)
 
         final_text = " ".join(texts).strip()
 
@@ -75,7 +77,8 @@ def extract_text(image_path):
 
         return {
             "success": True,
-            "text": final_text
+            "text": final_text,
+            "confidence": None
         }
 
     except Exception as e:
@@ -83,5 +86,6 @@ def extract_text(image_path):
         return {
             "success": False,
             "text": "",
+            "confidence": None,
             "error": str(e)
         }

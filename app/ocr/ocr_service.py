@@ -57,7 +57,7 @@ def extract_text(image_path):
             paragraph=True
         )
 
-        print("OCR RESULTS:", results)
+        
 
         texts = []
 

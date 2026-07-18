@@ -1,8 +1,13 @@
 import io
 import json
 import logging
+from app.auth.router import router as auth_router
+from app.health.router import router as health_router
+from app.dashboard.router import router as dashboard_router
+from app.reminders.router import router as reminders_router
 from pathlib import Path
 from typing import Any, Dict
+
 
 import torch
 from fastapi import FastAPI, File, HTTPException, UploadFile
@@ -41,12 +46,13 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="MedScan AI Backend",
-    description=(
-        "Core Backend and AI Integration Services "
-        "for the MedScan AI Project"
-    ),
-    version="1.0.0",
+    description="Core Backend & AI Integration Services for MedScan AI Project",
+    version="1.0.0"
 )
+app.include_router(auth_router, prefix="/auth", tags=["Authentication"])
+app.include_router(health_router, prefix="/profile", tags=["Health Profile"])
+app.include_router(dashboard_router, prefix="/dashboard", tags=["Dashboard"])
+app.include_router(reminders_router, prefix="/reminders", tags=["Reminders"])
 
 
 app.add_middleware(

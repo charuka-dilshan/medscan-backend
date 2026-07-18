@@ -19,6 +19,7 @@ from torchvision import models, transforms
 from app.ai.safety import evaluate_ocr_safety
 from app.ocr.ocr_service import extract_text_from_image
 from app.ocr.groq_service import parse_prescription_text
+from app.ml.pill_classifier import classify_pill
 
 
 # ==========================================
@@ -245,117 +246,32 @@ async def root() -> Dict[str, str]:
 @app.post("/predict")
 async def predict(
     file: UploadFile = File(...),
-) -> Dict[str, Any]:
-    try:
-        contents = await file.read()
+):
+    contents = await file.read()
 
-        if not contents:
-            raise HTTPException(
-                status_code=400,
-                detail="The uploaded file is empty.",
-            )
-
-        image = Image.open(
-            io.BytesIO(contents)
-        ).convert("RGB")
-
-        image_tensor = validation_transform(
-            image
-        ).unsqueeze(0)
-
-        with torch.no_grad():
-            logits = pill_model(image_tensor)
-
-            probabilities = torch.nn.functional.softmax(
-                logits,
-                dim=1,
-            )
-
-            confidence, predicted_index = torch.max(
-                probabilities,
-                dim=1,
-            )
-
-        confidence_value = float(
-            confidence.item()
-        )
-
-        predicted_class_index = int(
-            predicted_index.item()
-        )
-
-        verify_pill_safety_threshold(
-            confidence_value
-        )
-
-        return {
-            "status": "success",
-            "safety_block": False,
-            "allow_ai_processing": True,
-            "pill": class_names[
-                predicted_class_index
-            ],
-            "confidence": confidence_value,
-        }
-
-    except HTTPException:
-        raise
-
-    except Exception as error:
-        logger.exception(
-            "Prediction route error"
-        )
-
-        raise HTTPException(
-            status_code=500,
-            detail=str(error),
-        ) from error
-
-
-# ==========================================
-# TEXT PARSING ENDPOINT
-# ==========================================
-
-@app.post("/parse-prescription")
-async def parse_prescription(
-    request: OCRRequest,
-) -> Dict[str, Any]:
-    raw_text = request.raw_text.strip()
-
-    if not raw_text:
+    if not contents:
         raise HTTPException(
             status_code=400,
-            detail="Prescription text cannot be empty.",
+            detail="Uploaded file is empty.",
         )
 
-    try:
-        ai_data = parse_prescription_text(
-            raw_text
-        )
+    result = classify_pill(
+        contents
+    )
 
-        if isinstance(ai_data, dict) and "error" in ai_data:
-            raise HTTPException(
-                status_code=500,
-                detail=ai_data,
-            )
-
-        return {
-            "status": "success",
-            "prescription": ai_data,
-        }
-
-    except HTTPException:
-        raise
-
-    except Exception as error:
-        logger.exception(
-            "Prescription parsing route error"
-        )
-
+    if not result.get(
+        "allow_ai_processing",
+        False,
+    ):
         raise HTTPException(
-            status_code=500,
-            detail=str(error),
-        ) from error
+            status_code=422,
+            detail=result,
+        )
+
+    return {
+        "status": "success",
+        **result,
+    }
 
 
 # ==========================================

@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import sys
+from app.auth.router import router as auth_router
 from PIL import Image
 
 # DYNAMIC SYSTEM PATH FIX: 
@@ -51,6 +52,7 @@ app = FastAPI(
     description="Core Backend & AI Integration Services for MedScan AI Project",
     version="1.0.0"
 )
+app.include_router(auth_router, prefix="/auth", tags=["Authentication"])
 
 # 🌐 CORS Middleware Configuration
 app.add_middleware(

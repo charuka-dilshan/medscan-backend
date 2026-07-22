@@ -56,11 +56,8 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="MedScan AI Backend",
-    description=(
-        "Core Backend and AI Integration Services "
-        "for the MedScan AI Project"
-    ),
-    version="1.0.0",
+    description="Core Backend & AI Integration Services for MedScan AI Project",
+    version="1.0.0"
 )
 Base.metadata.create_all(bind=engine)
 

@@ -1,8 +1,13 @@
 import io
 import json
 import logging
+from app.auth.router import router as auth_router
+from app.health.router import router as health_router
+from app.dashboard.router import router as dashboard_router
+from app.reminders.router import router as reminders_router
 from pathlib import Path
 from typing import Any, Dict
+
 
 import torch
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile

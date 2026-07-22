@@ -2,8 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import desc
-
-from app.database.database import get_db
+from app.database import get_db
 from app.models.user import User
 from app.models.profile import HealthProfile
 from app.models.reminder import Reminder

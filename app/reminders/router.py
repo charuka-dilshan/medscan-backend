@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from app.database.database import get_db
+from app.database import get_db
 from app.models.reminder import Reminder
 from app.schemas.reminder import ReminderCreate, ReminderResponse
 from app.auth.dependencies import get_current_user_id

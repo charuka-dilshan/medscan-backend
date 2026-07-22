@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 import torch
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image
 from pydantic import BaseModel
@@ -15,17 +15,26 @@ from app.ai.safety import evaluate_ocr_safety
 from app.ocr.ocr_service import extract_text_from_image
 from app.ocr.groq_service import parse_prescription_text
 from app.ml.pill_classifier import classify_pill
+from app.database import Base, engine
+from app.models import ScanLog
 
+from fastapi import Depends
+from sqlalchemy.orm import Session
+
+from app.database import get_db
+from app.services.scan_log_service import save_scan_log
 
 # ==========================================
 # PROJECT PATHS
 # ==========================================
 
 APP_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = APP_DIR.parent
+from pathlib import Path
 
-CLASS_NAMES_PATH = PROJECT_ROOT / "ml" / "class_names.json"
-MODEL_WEIGHTS_PATH = PROJECT_ROOT / "ml" / "pill_model.pth"
+APP_DIR = Path(__file__).resolve().parent
+
+CLASS_NAMES_PATH = APP_DIR / "ml" / "class_names.json"
+MODEL_WEIGHTS_PATH = APP_DIR / "ml" / "pill_model.pth"
 
 
 # ==========================================
@@ -48,6 +57,7 @@ app = FastAPI(
     ),
     version="1.0.0",
 )
+Base.metadata.create_all(bind=engine)
 
 
 app.add_middleware(
@@ -238,8 +248,9 @@ async def root() -> Dict[str, str]:
 # ==========================================
 
 @app.post("/predict")
-async def predict(
+async def predict_pill(
     file: UploadFile = File(...),
+    db: Session = Depends(get_db),
 ):
     contents = await file.read()
 
@@ -249,18 +260,36 @@ async def predict(
             detail="Uploaded file is empty.",
         )
 
-    result = classify_pill(
-        contents
-    )
+    result = classify_pill(contents)
 
-    if not result.get(
-        "allow_ai_processing",
-        False,
-    ):
-        raise HTTPException(
-            status_code=422,
-            detail=result,
+    if not result.get("allow_ai_processing", False):
+        save_scan_log(
+            db,
+            scan_type="pill",
+            status="safety_block",
+            allow_ai_processing=False,
+            predicted_label=result.get("predicted_class"),
+            confidence=result.get("confidence"),
+            message=result.get(
+                "reason",
+                "Confidence below safety threshold",
+            ),
         )
+
+        return {
+            "status": "safety_block",
+            **result,
+        }
+
+    save_scan_log(
+        db,
+        scan_type="pill",
+        status="success",
+        allow_ai_processing=True,
+        predicted_label=result.get("predicted_class"),
+        confidence=result.get("confidence"),
+        message="Pill classification completed successfully.",
+    )
 
     return {
         "status": "success",

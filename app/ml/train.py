@@ -71,3 +71,5 @@ for epoch in range(10): # Adjust epochs based on your convergence
 # 6. Save the model
 torch.save(model.state_dict(), "pill_model.pth")
 print("Model saved as pill_model.pth")
+
+print(train_dataset.class_to_idx)

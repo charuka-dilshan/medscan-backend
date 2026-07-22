@@ -31,7 +31,7 @@ MODEL_WEIGHTS_PATH = CURRENT_DIR / "pill_model.pth"
 # Configuration
 # ---------------------------------------------------------
 
-PILL_CONFIDENCE_THRESHOLD = 0.85
+PILL_CONFIDENCE_THRESHOLD = 0.60
 
 
 # ---------------------------------------------------------
@@ -349,6 +349,9 @@ def classify_pill(
                 logits,
                 dim=1,
             )
+
+            print("Classes:", class_names)
+            print("Probabilities:", probabilities.tolist())
 
             confidence_tensor, index_tensor = torch.max(
                 probabilities,

@@ -1,7 +1,17 @@
-from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime, Date
-from sqlalchemy.orm import relationship
 from datetime import datetime
-from app.database.database import Base
+
+from sqlalchemy import (
+    Column,
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+)
+from sqlalchemy.orm import relationship
+
+from app.database import Base
 
 class HealthProfile(Base):
     __tablename__ = "health_profiles"

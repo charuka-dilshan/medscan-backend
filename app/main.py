@@ -1,40 +1,29 @@
-import io
 import json
 import logging
-from app.auth.router import router as auth_router
-from app.health.router import router as health_router
-from app.dashboard.router import router as dashboard_router
-from app.reminders.router import router as reminders_router
 from pathlib import Path
 from typing import Any, Dict
-
 
 import torch
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from PIL import Image
-from pydantic import BaseModel
+from sqlalchemy.orm import Session
 from torchvision import models, transforms
 
 from app.ai.safety import evaluate_ocr_safety
-from app.ocr.ocr_service import extract_text_from_image
-from app.ocr.groq_service import parse_prescription_text
+from app.auth.router import router as auth_router
+from app.dashboard.router import router as dashboard_router
+from app.database import Base, engine, get_db
+from app.health.router import router as health_router
 from app.ml.pill_classifier import classify_pill
-from app.database import Base, engine
-from app.models import ScanLog
-
-from fastapi import Depends
-from sqlalchemy.orm import Session
-
-from app.database import get_db
+from app.ocr.groq_service import parse_prescription_text
+from app.ocr.ocr_service import extract_text_from_image
+from app.reminders.router import router as reminders_router
 from app.services.scan_log_service import save_scan_log
+
 
 # ==========================================
 # PROJECT PATHS
 # ==========================================
-
-APP_DIR = Path(__file__).resolve().parent
-from pathlib import Path
 
 APP_DIR = Path(__file__).resolve().parent
 
@@ -57,10 +46,17 @@ logger = logging.getLogger(__name__)
 app = FastAPI(
     title="MedScan AI Backend",
     description="Core Backend & AI Integration Services for MedScan AI Project",
-    version="1.0.0"
+    version="1.0.0",
 )
+
+
+# Create database tables
 Base.metadata.create_all(bind=engine)
 
+
+# ==========================================
+# CORS CONFIGURATION
+# ==========================================
 
 app.add_middleware(
     CORSMiddleware,
@@ -69,6 +65,16 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ==========================================
+# REGISTER ROUTERS
+# ==========================================
+
+app.include_router(auth_router)
+app.include_router(health_router)
+app.include_router(dashboard_router)
+app.include_router(reminders_router)
 
 
 # ==========================================
@@ -101,7 +107,7 @@ def load_class_names() -> list[str]:
 
         if not isinstance(loaded_classes, list):
             raise ValueError(
-                "class_names.json must contain a JSON list"
+                "class_names.json must contain a JSON list."
             )
 
         return loaded_classes
@@ -153,7 +159,7 @@ def load_pill_model() -> torch.nn.Module:
             )
 
         except Exception as error:
-            logger.error(
+            logger.exception(
                 "Failed to load pill model weights: %s",
                 error,
             )
@@ -174,70 +180,13 @@ pill_model = load_pill_model()
 
 
 # ==========================================
-# PILL SAFETY THRESHOLD
-# ==========================================
-
-PILL_CONFIDENCE_THRESHOLD = 0.85
-
-
-def create_pill_safety_block(
-    confidence: float,
-) -> Dict[str, Any]:
-    return {
-        "status": "safety_block",
-        "safety_block": True,
-        "allow_ai_processing": False,
-        "confidence": confidence,
-        "messages": {
-            "en": (
-                "Safety Block: The pill could not be identified "
-                "with sufficient confidence. Please take another "
-                "clear photo or consult a registered medical professional."
-            ),
-            "si": (
-                "ආරක්ෂක අවහිර කිරීම: ඖෂධය ප්‍රමාණවත් විශ්වාසයකින් "
-                "හඳුනාගත නොහැකි විය. කරුණාකර පැහැදිලි ඡායාරූපයක් "
-                "නැවත ලබාගන්න හෝ ලියාපදිංචි වෛද්‍ය වෘත්තිකයෙකුගෙන් "
-                "විමසන්න."
-            ),
-            "ta": (
-                "பாதுகாப்புத் தடுப்பு: மாத்திரையை போதுமான "
-                "நம்பகத்தன்மையுடன் அடையாளம் காண முடியவில்லை. "
-                "தெளிவான படத்தை மீண்டும் எடுக்கவும் அல்லது பதிவுசெய்யப்பட்ட "
-                "மருத்துவ நிபுணரை அணுகவும்."
-            ),
-        },
-    }
-
-
-def verify_pill_safety_threshold(
-    confidence: float,
-) -> None:
-    if confidence < PILL_CONFIDENCE_THRESHOLD:
-        logger.warning(
-            "Pill safety block triggered. Confidence: %.4f",
-            confidence,
-        )
-
-        raise HTTPException(
-            status_code=422,
-            detail=create_pill_safety_block(confidence),
-        )
-
-
-# ==========================================
-# REQUEST MODELS
-# ==========================================
-
-class OCRRequest(BaseModel):
-    raw_text: str
-
-
-# ==========================================
 # ROOT ENDPOINT
 # ==========================================
 
-@app.get("/")
+@app.get(
+    "/",
+    tags=["System"],
+)
 async def root() -> Dict[str, str]:
     return {
         "message": "MedScan AI Backend is operational.",
@@ -249,11 +198,15 @@ async def root() -> Dict[str, str]:
 # PILL PREDICTION ENDPOINT
 # ==========================================
 
-@app.post("/predict")
+@app.post(
+    "/predict",
+    tags=["Pill Classification"],
+)
 async def predict_pill(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-):
+) -> Dict[str, Any]:
+
     contents = await file.read()
 
     if not contents:
@@ -262,51 +215,72 @@ async def predict_pill(
             detail="Uploaded file is empty.",
         )
 
-    result = classify_pill(contents)
+    try:
+        result = classify_pill(contents)
 
-    if not result.get("allow_ai_processing", False):
+        if not result.get(
+            "allow_ai_processing",
+            False,
+        ):
+            save_scan_log(
+                db,
+                scan_type="pill",
+                status="safety_block",
+                allow_ai_processing=False,
+                predicted_label=result.get("predicted_class"),
+                confidence=result.get("confidence"),
+                message=result.get(
+                    "reason",
+                    "Confidence below safety threshold.",
+                ),
+            )
+
+            return {
+                "status": "safety_block",
+                **result,
+            }
+
         save_scan_log(
             db,
             scan_type="pill",
-            status="safety_block",
-            allow_ai_processing=False,
+            status="success",
+            allow_ai_processing=True,
             predicted_label=result.get("predicted_class"),
             confidence=result.get("confidence"),
-            message=result.get(
-                "reason",
-                "Confidence below safety threshold",
-            ),
+            message="Pill classification completed successfully.",
         )
 
         return {
-            "status": "safety_block",
+            "status": "success",
             **result,
         }
 
-    save_scan_log(
-        db,
-        scan_type="pill",
-        status="success",
-        allow_ai_processing=True,
-        predicted_label=result.get("predicted_class"),
-        confidence=result.get("confidence"),
-        message="Pill classification completed successfully.",
-    )
+    except HTTPException:
+        raise
 
-    return {
-        "status": "success",
-        **result,
-    }
+    except Exception as error:
+        logger.exception(
+            "Pill prediction route error."
+        )
+
+        raise HTTPException(
+            status_code=500,
+            detail="Pill prediction failed.",
+        ) from error
 
 
 # ==========================================
 # FULL PRESCRIPTION SCAN ENDPOINT
 # ==========================================
 
-@app.post("/scan-prescription")
+@app.post(
+    "/scan-prescription",
+    tags=["Prescription Scanner"],
+)
 async def scan_prescription(
     file: UploadFile = File(...),
 ) -> Dict[str, Any]:
+
     try:
         contents = await file.read()
 
@@ -316,12 +290,12 @@ async def scan_prescription(
                 detail="The uploaded file is empty.",
             )
 
-        # Step 1: EasyOCR extraction
+        # Step 1: Extract text using EasyOCR
         ocr_result = extract_text_from_image(
             contents
         )
 
-        # Step 2: OCR 85% safety evaluation
+        # Step 2: Evaluate OCR safety
         safety_result = evaluate_ocr_safety(
             ocr_result
         )
@@ -330,10 +304,10 @@ async def scan_prescription(
             "allow_ai_processing",
             False,
         ):
-            raise HTTPException(
-                status_code=422,
-                detail=safety_result,
-            )
+            return {
+                "status": "safety_block",
+                **safety_result,
+            }
 
         raw_text = str(
             safety_result.get(
@@ -342,7 +316,15 @@ async def scan_prescription(
             )
         ).strip()
 
-        # Step 3: Groq is called only after safety passes
+        if not raw_text:
+            return {
+                "status": "safety_block",
+                "safety_block": True,
+                "allow_ai_processing": False,
+                "message": "No readable prescription text was detected.",
+            }
+
+        # Step 3: Send OCR text to Groq only after safety passes
         ai_data = parse_prescription_text(
             raw_text
         )
@@ -361,9 +343,10 @@ async def scan_prescription(
             "safety_block": False,
             "allow_ai_processing": True,
             "raw_ocr_text": raw_text,
-            "ocr_quality_score": safety_result[
-                "quality_score"
-            ],
+            "ocr_quality_score": safety_result.get(
+                "quality_score",
+                0,
+            ),
             "prescription": ai_data,
         }
 
@@ -372,12 +355,12 @@ async def scan_prescription(
 
     except Exception as error:
         logger.exception(
-            "Scan prescription route error"
+            "Scan prescription route error."
         )
 
         raise HTTPException(
             status_code=500,
-            detail=str(error),
+            detail="Prescription scanning failed.",
         ) from error
 
 

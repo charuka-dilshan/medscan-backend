@@ -1,33 +1,117 @@
-# 📂 File Path: app/auth/service.py
+# File: app/auth/service.py
+
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+
 import bcrypt
 import jwt
 from dotenv import load_dotenv
 
+
 load_dotenv()
 
-# Secrets (.env එකෙන් කියවයි, නැතහොත් fallback අගයක් ගනී)
-JWT_SECRET = os.getenv("JWT_SECRET", "medscan-ai-hackathon-secret-key-2026")
+
+JWT_SECRET = os.getenv(
+    "JWT_SECRET",
+    "medscan-ai-hackathon-secret-key-2026",
+)
+
 JWT_ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 1440  # ටෝකන් එක දින 1ක් (මිනිට්තු 1440) වලංගු වේ
+
+ACCESS_TOKEN_EXPIRE_MINUTES = int(
+    os.getenv(
+        "ACCESS_TOKEN_EXPIRE_MINUTES",
+        "1440",
+    )
+)
+
 
 class AuthService:
     @staticmethod
     def hash_password(password: str) -> str:
-        """පරිශීලකයාගේ මුරපදය ආරක්ෂිතව Hash කිරීම"""
+        """
+        Hash a plain-text password using bcrypt.
+        """
+
+        password_bytes = password.encode("utf-8")
         salt = bcrypt.gensalt()
-        return bcrypt.hashpw(password.encode('utf-8'), salt).decode('utf-8')
+
+        hashed_password = bcrypt.hashpw(
+            password_bytes,
+            salt,
+        )
+
+        return hashed_password.decode("utf-8")
 
     @staticmethod
-    def verify_password(plain_password: str, hashed_password: str) -> bool:
-        """ඇතුලත් කල මුරපදය සහ Database එකේ ඇති Hash එක සැසඳීම"""
-        return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
+    def verify_password(
+        plain_password: str,
+        hashed_password: str,
+    ) -> bool:
+        """
+        Compare a plain-text password with a bcrypt hash.
+        """
+
+        try:
+            return bcrypt.checkpw(
+                plain_password.encode("utf-8"),
+                hashed_password.encode("utf-8"),
+            )
+
+        except (
+            ValueError,
+            TypeError,
+            AttributeError,
+        ):
+            return False
 
     @staticmethod
-    def create_access_token(data: dict) -> str:
-        """JWT Token එකක් සෑදීම"""
-        to_encode = data.copy()
-        expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-        to_encode.update({"exp": expire})
-        return jwt.encode(to_encode, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    def create_access_token(
+        data: dict,
+        expires_delta: timedelta | None = None,
+    ) -> str:
+        """
+        Create a signed JWT access token.
+        """
+
+        payload = data.copy()
+
+        if expires_delta is None:
+            expires_delta = timedelta(
+                minutes=ACCESS_TOKEN_EXPIRE_MINUTES
+            )
+
+        expire_time = (
+            datetime.now(timezone.utc)
+            + expires_delta
+        )
+
+        payload.update(
+            {
+                "exp": expire_time,
+            }
+        )
+
+        return jwt.encode(
+            payload,
+            JWT_SECRET,
+            algorithm=JWT_ALGORITHM,
+        )
+
+    @staticmethod
+    def decode_access_token(
+        token: str,
+    ) -> dict | None:
+        """
+        Decode and validate a JWT access token.
+        """
+
+        try:
+            return jwt.decode(
+                token,
+                JWT_SECRET,
+                algorithms=[JWT_ALGORITHM],
+            )
+
+        except jwt.PyJWTError:
+            return None

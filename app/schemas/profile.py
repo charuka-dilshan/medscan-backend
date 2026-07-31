@@ -1,15 +1,18 @@
-from pydantic import BaseModel
+from datetime import date, datetime
 from typing import Optional
-from datetime import datetime
+
+from pydantic import BaseModel
+
 
 class ProfileCreate(BaseModel):
-    age: Optional[int] = None
+    date_of_birth: Optional[date] = None
     gender: Optional[str] = None
     height: Optional[float] = None
     weight: Optional[float] = None
     bmi: Optional[float] = None
     conditions: Optional[str] = None
     allergies: Optional[str] = None
+
 
 class ProfileResponse(ProfileCreate):
     id: int

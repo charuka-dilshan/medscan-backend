@@ -1,11 +1,23 @@
-from pydantic import BaseModel
 from datetime import datetime
+from typing import Optional
+
+from pydantic import BaseModel
+
 
 class ReminderCreate(BaseModel):
-    title: str               # උදා: "Morning Medicine"
-    medicine_name: str       # උදා: "Paracetamol"
-    time: str                # උදා: "08:00 AM"
-    frequency: str           # උදා: "Daily"
+    title: str
+    medicine_name: str
+    time: str
+    frequency: str
+
+
+class ReminderUpdate(BaseModel):
+    title: Optional[str] = None
+    medicine_name: Optional[str] = None
+    time: Optional[str] = None
+    frequency: Optional[str] = None
+    active: Optional[bool] = None
+
 
 class ReminderResponse(ReminderCreate):
     id: int
